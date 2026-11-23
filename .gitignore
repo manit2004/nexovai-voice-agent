@@ -1,0 +1,18 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+server/*.db
+
+# node
+node_modules/
+web/dist/
+
+# misc
+.DS_Store
+*.log
