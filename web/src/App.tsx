@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Appointment, Doctor, ServerEvent } from './types'
 import { useCall } from './useCall'
 import { Phone } from './components/Phone'
@@ -41,7 +41,7 @@ export default function App() {
     (e: ServerEvent) => {
       if (e.type !== 'appointment') return
       const { appointment: a, action } = e
-      // Jump the roster to the affected day and light up the slot + ledger row.
+      // Jump the schedule to the affected day and highlight the slot and the table row.
       setDay(dayKey(a.starts_at))
       const mark = (set: React.Dispatch<React.SetStateAction<Flash>>, id: number) => {
         set((m) => new Map(m).set(id, action))
@@ -65,78 +65,36 @@ export default function App() {
     setTimeout(call.reset, 350) // let the phone slide out first
   }
 
-  const stats = useMemo(() => {
-    const now = new Date()
-    const openSlots = doctors.flatMap((d) => d.slots).filter((s) => !s.booked && new Date(s.starts_at) > now).length
-    return {
-      open: openSlots,
-      booked: appointments.filter((a) => a.status === 'booked').length,
-      cancelled: appointments.filter((a) => a.status === 'cancelled').length,
-    }
-  }, [doctors, appointments])
-
-  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })
+  const today = new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
   const inCall = call.status === 'ringing' || call.status === 'live'
 
   return (
     <div className="app" data-phone={phoneOpen}>
       <header className="top">
         <div className="brand">
-          <span className="mark" aria-hidden>
-            +
+          <span className="logo" aria-hidden>
+            L
           </span>
-          <span className="word">Larkspur</span>
-          <span className="sep" />
-          <span className="desk">Front desk</span>
+          <span className="clinic">Larkspur Clinic</span>
+          <span className="section">Front desk</span>
         </div>
         <div className="top-right">
-          <span className="status" data-online={online}>
-            <i /> {online === false ? 'Server offline' : 'Agent on duty'}
-          </span>
           <span className="date">{today}</span>
+          <span className="status" data-online={online}>
+            <i /> {online === null ? 'Connecting' : online ? 'Connected' : 'Server offline'}
+          </span>
+          <button className="btn primary" onClick={open} data-live={inCall}>
+            <Icon name="phone" size={16} />
+            {inCall ? 'Back to call' : 'Start call'}
+          </button>
         </div>
       </header>
 
       <main className="main">
-        <section className="hero">
-          <div>
-            <h1>
-              Calls in. <em>Bookings out.</em>
-            </h1>
-            <p>
-              The voice agent checks slots, books and cancels, identifying callers by the number they say aloud.
-            </p>
-          </div>
-          <div className="hero-side">
-            <dl className="stats">
-              <div>
-                <dt>Open slots</dt>
-                <dd>{stats.open}</dd>
-              </div>
-              <div>
-                <dt>Booked</dt>
-                <dd>{stats.booked}</dd>
-              </div>
-              <div>
-                <dt>Cancelled</dt>
-                <dd>{stats.cancelled}</dd>
-              </div>
-            </dl>
-            <button className="try" onClick={open} data-live={inCall}>
-              <span className="try-ico">
-                <Icon name="phone" size={18} />
-              </span>
-              {inCall ? 'Return to call' : 'Try a call'}
-            </button>
-          </div>
-        </section>
-
-        <div className="grid">
-          <Roster doctors={doctors} day={day} onDay={setDay} flash={slotFlash} />
-          <div className="stack">
-            <Ledger appointments={appointments} flash={rowFlash} />
-            <ActivityLog items={call.activity} />
-          </div>
+        <Roster doctors={doctors} day={day} onDay={setDay} flash={slotFlash} online={online} />
+        <div className="side">
+          <Ledger appointments={appointments} flash={rowFlash} />
+          <ActivityLog items={call.activity} />
         </div>
       </main>
 

@@ -17,7 +17,7 @@ from loguru import logger
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
 from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -28,7 +28,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.llm_service import FunctionCallParams, FunctionCallResultProperties
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -71,7 +71,10 @@ Rules:
 - If a tool returns an error, explain it plainly and offer the next best option.
 - If the caller describes symptoms, suggest the matching specialist; do not give medical advice.
   For emergencies, tell them to call 112 right away.
-- After finishing a task, ask if there is anything else. Keep the whole call brief and warm."""
+- After finishing a task, ask if there is anything else. Keep the whole call brief and warm.
+- When the caller has nothing else (they say bye, thanks, that's all), hang up by calling end_call
+  with a short goodbye. Respond with only that function call: end_call speaks the goodbye itself,
+  so don't also say it as text."""
 
 
 # ------------------------------------------------------------------ tools
@@ -120,6 +123,14 @@ TOOLS = ToolsSchema(
             },
             required=["phone_number", "caller_confirmed_number"],
         ),
+        FunctionSchema(
+            name="end_call",
+            description="Say goodbye and hang up. Use when the caller has nothing else to ask.",
+            properties={
+                "goodbye": {"type": "string", "description": "One short goodbye line, spoken before hanging up."},
+            },
+            required=["goodbye"],
+        ),
     ]
 )
 
@@ -158,6 +169,25 @@ def make_handler(name: str, fn, worker_ref: dict):
             action = "booked" if name == "book_appointment" else "cancelled"
             await rtvi.send_server_message({"type": "appointment", "action": action, "appointment": result["appointment"]})
         await params.result_callback(result)
+
+    return handler
+
+
+def make_end_call_handler(worker_ref: dict):
+    async def handler(params: FunctionCallParams):
+        goodbye = str((params.arguments or {}).get("goodbye") or "Thanks for calling. Goodbye!")
+        rtvi = worker_ref["worker"].rtvi
+        call_id = params.tool_call_id or uuid.uuid4().hex
+        await rtvi.send_server_message({"type": "tool", "phase": "start", "id": call_id, "name": "end_call", "args": {}})
+        await rtvi.send_server_message(
+            {"type": "tool", "phase": "result", "id": call_id, "name": "end_call", "ok": True, "summary": "Agent hung up"}
+        )
+        logger.info("Agent is ending the call")
+        # No follow-up LLM turn: speak the goodbye, then end. EndWorkerFrame travels behind the
+        # goodbye audio, so the pipeline (and the WebRTC call) closes only after it has played.
+        await params.result_callback({"ok": True}, properties=FunctionCallResultProperties(run_llm=False))
+        await params.llm.push_frame(TTSSpeakFrame(goodbye))
+        await params.llm.push_frame(EndWorkerFrame(reason="agent hung up"))
 
     return handler
 
@@ -233,6 +263,7 @@ async def _run(connection: SmallWebRTCConnection) -> None:
     worker_ref: dict = {}
     for name, fn in TOOL_FNS.items():
         llm.register_function(name, make_handler(name, fn, worker_ref))
+    llm.register_function("end_call", make_end_call_handler(worker_ref))
 
     context = LLMContext(tools=TOOLS)
     aggregators = LLMContextAggregatorPair(

@@ -6,7 +6,7 @@ silence, which is the worst outcome on a phone call. This subclass:
 
 - retries a turn on the next model in the list when a request fails *before its first
   chunk* (once text has started streaming it is passed straight through),
-- benches a rate-limited model for a minute so later turns don't pay for the 429 again,
+- benches a failing model for a minute so later turns don't wait on it again,
 - makes a second pass after a short pause if every model failed, and
 - if that fails too, says a short apology instead of going quiet.
 """
@@ -23,7 +23,7 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.google.llm import GoogleLLMService
 
-RATE_LIMIT_COOLDOWN_SECS = 60
+COOLDOWN_SECS = 60
 APOLOGY = "Sorry, I didn't quite catch that. Could you say it again?"
 
 
@@ -34,7 +34,7 @@ def _transient(e: BaseException) -> bool:
 
 
 class FailoverGoogleLLMService(GoogleLLMService):
-    def __init__(self, *, fallback_models: list[str], first_chunk_timeout: float = 7.0, **kwargs):
+    def __init__(self, *, fallback_models: list[str], first_chunk_timeout: float = 4.0, **kwargs):
         super().__init__(**kwargs)
         self._fallback_models = fallback_models
         self._first_chunk_timeout = first_chunk_timeout
@@ -67,8 +67,9 @@ class FailoverGoogleLLMService(GoogleLLMService):
                         # thought signatures), so on fallbacks any client error moves on too.
                         if not (_transient(e) or (model != primary and isinstance(e, ClientError))):
                             raise
-                        if isinstance(e, ClientError) and e.code == 429:
-                            self._benched_until[model] = time.monotonic() + RATE_LIMIT_COOLDOWN_SECS
+                        # Bench it either way: a model that just hung or 503'd usually does
+                        # so again on the next turn, and waiting on it again costs seconds.
+                        self._benched_until[model] = time.monotonic() + COOLDOWN_SECS
                         last_error = e
                         logger.warning(f"{model} unavailable ({getattr(e, 'code', None) or type(e).__name__})")
                         continue

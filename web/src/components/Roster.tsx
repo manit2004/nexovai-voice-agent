@@ -7,27 +7,32 @@ type Props = {
   day: string | null
   onDay: (d: string) => void
   flash: Map<number, 'booked' | 'cancelled'>
+  online: boolean | null
 }
 
-export function Roster({ doctors, day, onDay, flash }: Props) {
+export function Roster({ doctors, day, onDay, flash, online }: Props) {
+  const now = localIso()
+
   const days = useMemo(() => {
     const m = new Map<string, number>()
     for (const d of doctors)
       for (const s of d.slots) {
         const k = dayKey(s.starts_at)
-        m.set(k, (m.get(k) ?? 0) + (!s.booked && s.starts_at > localIso() ? 1 : 0))
+        m.set(k, (m.get(k) ?? 0) + (!s.booked && s.starts_at > now ? 1 : 0))
       }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [doctors])
+  }, [doctors, now])
 
-  const active = day ?? days[0]?.[0]
+  // Default to the first day that still has a free slot (late in the day, today has none).
+  const active = day ?? (days.find(([, open]) => open > 0) ?? days[0])?.[0]
 
   return (
-    <section className="panel roster">
-      <div className="panel-head">
-        <h2>Doctors</h2>
+    <section className="card schedule">
+      <div className="card-head">
+        <h2>Schedule</h2>
         <span className="legend">
-          <i className="sw open" /> open <i className="sw taken" /> booked
+          <i className="sw open" /> Available
+          <i className="sw taken" /> Booked
         </span>
       </div>
 
@@ -38,7 +43,7 @@ export function Roster({ doctors, day, onDay, flash }: Props) {
             <button key={k} role="tab" aria-selected={k === active} className="day" onClick={() => onDay(k)}>
               <span className="dow">{d.toLocaleDateString('en-IN', { weekday: 'short' })}</span>
               <span className="dom">{d.getDate()}</span>
-              <span className="cnt">{open || '—'}</span>
+              <span className="cnt">{open} open</span>
             </button>
           )
         })}
@@ -50,7 +55,7 @@ export function Roster({ doctors, day, onDay, flash }: Props) {
           return (
             <li key={doc.id} className="doc">
               <div className="doc-id">
-                <span className="mono-badge">{initials(doc.name)}</span>
+                <span className="avatar-sm">{initials(doc.name)}</span>
                 <div>
                   <div className="doc-name">{doc.name}</div>
                   <div className="doc-meta">
@@ -59,17 +64,15 @@ export function Roster({ doctors, day, onDay, flash }: Props) {
                 </div>
               </div>
               <div className="slots">
-                {slots.length === 0 && <span className="off">Not in clinic</span>}
+                {slots.length === 0 && <span className="off">Not available</span>}
                 {slots.map((s) => {
-                  const past = s.starts_at.slice(0, 16) <= localIso()
-                  const f = flash.get(s.id)
+                  const past = s.starts_at.slice(0, 16) <= now
                   return (
                     <span
                       key={s.id}
                       className="slot"
                       data-state={past ? 'past' : s.booked ? 'taken' : 'open'}
-                      data-flash={f}
-                      title={past ? 'Past' : s.booked ? 'Booked' : 'Open'}
+                      data-flash={flash.get(s.id)}
                     >
                       {fmtTime(s.starts_at)}
                     </span>
@@ -79,7 +82,9 @@ export function Roster({ doctors, day, onDay, flash }: Props) {
             </li>
           )
         })}
-        {doctors.length === 0 && <li className="empty">Waiting for the clinic server…</li>}
+        {doctors.length === 0 && (
+          <li className="empty">{online === false ? "Can't reach the server on port 7860." : 'Loading…'}</li>
+        )}
       </ul>
     </section>
   )

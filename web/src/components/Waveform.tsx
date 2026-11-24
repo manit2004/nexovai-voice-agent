@@ -5,7 +5,7 @@ const BARS = 36
 
 /**
  * Mirrored bar waveform drawn from the live mic and agent audio. The agent's
- * voice is drawn in paper white, the caller's in vermilion on top of it.
+ * voice is drawn in white, the caller's in teal on top of it.
  */
 export function Waveform({ analysers, active }: { analysers: CallApi['analysers']; active: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -49,7 +49,7 @@ export function Waveform({ analysers, active }: { analysers: CallApi['analysers'
       const order = (i: number) => Math.abs(i - (BARS - 1) / 2) / (BARS / 2)
       for (const [arr, color] of [
         [smooth.remote, 'rgba(243,239,230,0.92)'],
-        [smooth.local, 'rgba(228,87,46,0.95)'],
+        [smooth.local, 'rgba(94,234,212,0.95)'],
       ] as const) {
         ctx.fillStyle = color
         for (let i = 0; i < BARS; i++) {
